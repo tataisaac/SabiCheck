@@ -32,15 +32,14 @@ enum AnalysisErrorKind {
 /// Drives the main "check a message" screen: input, screenshot, verdict,
 /// language switching (translation with cache), and share-sheet intake.
 class AnalysisController extends ChangeNotifier {
+  /// Named parameters are `apiFactory`, `history`, `shareReceiver`, `imageLoader`
+  /// (Dart private named parameters: `this._x` exposes the parameter as `x`).
   AnalysisController({
-    required SabiCheckApi Function() apiFactory,
-    required HistoryController history,
-    ShareReceiver shareReceiver = const NoopShareReceiver(),
-    ImageLoader imageLoader = const ImageLoader(),
-  })  : _apiFactory = apiFactory,
-        _history = history,
-        _shareReceiver = shareReceiver,
-        _imageLoader = imageLoader;
+    required this._apiFactory,
+    required this._history,
+    ShareReceiver this._shareReceiver = const NoopShareReceiver(),
+    ImageLoader this._imageLoader = const ImageLoader(),
+  });
 
   final SabiCheckApi Function() _apiFactory;
   final HistoryController _history;

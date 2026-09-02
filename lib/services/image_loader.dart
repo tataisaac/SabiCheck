@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:cross_file/cross_file.dart';
 import 'package:flutter/foundation.dart';
@@ -42,7 +41,7 @@ class ImageLoader {
     final bytes = await file.readAsBytes();
     if (bytes.length > AppConfig.maxImageBytes) throw ImageTooLargeException(bytes.length);
     final mime = _resolveMime(file, mimeTypeHint, bytes);
-    if (!supportedMimeTypes.contains(mime)) throw UnsupportedImageException(mime);
+    if (mime == null || !supportedMimeTypes.contains(mime)) throw UnsupportedImageException(mime);
     return PickedImage(bytes: bytes, mimeType: mime, name: file.name.isEmpty ? 'image' : file.name);
   }
 
