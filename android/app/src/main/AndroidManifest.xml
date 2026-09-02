@@ -1,12 +1,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Network access to the SabiCheck API. (Previously only declared in the debug
+         manifest, which would have broken release builds.) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Older devices (API < 33) may share images as file:// URIs that need this to read.
+         Not requested on Android 13+, where the share sheet grants URI access directly. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+
     <application
-        android:label="sabicheck"
+        android:label="SabiCheck"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <!-- singleTask: a share from WhatsApp re-uses the running SabiCheck instead of
+             stacking a new copy of the app on top (recommended by receive_sharing_intent). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
@@ -23,6 +33,27 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+            <!-- ===== Share-sheet integration (SABICHECK_SPEC.md §3) =====
+                 Lets users long-press a message in WhatsApp/SMS/any app → Share → SabiCheck. -->
+            <!-- Shared text (WhatsApp messages, SMS, URLs, copied text). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/*"/>
+            </intent-filter>
+            <!-- A single shared screenshot / image. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
+            <!-- Several images at once (we analyze the first). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

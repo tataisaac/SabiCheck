@@ -4,7 +4,7 @@
 > (Flutter). It captures everything agreed in the ScamShield → SabiCheck conversation so the
 > plan survives a repo switch and is not reliant on chat memory.
 >
-> **Status:** Living spec. Update it as decisions change.
+> **Status:** Living spec. Update it as decisions change. Last updated **2026-09-02** (see §12).
 >
 > **New repo:** This document should be copied into the new Flutter repo when it is created.
 
@@ -147,7 +147,11 @@ IMPORTANT: You MUST respond entirely in {language} ({en = English | fr = French}
 - `translateContent(text, lang)` — plain translate of the input text.
 - `translateAnalysis(analysis, lang)` — translate only `category`, `summary`, `explanation`,
   `recommendedActions`; **never** translate `riskLevel`; never change `confidenceScore`.
-- Note: Each language switch today triggers 2 full Gemini calls — consider caching later.
+- Note: the web app translates **both** the analysis *and the user's pasted message* on every
+  language switch (2 Gemini calls, and it rewrites the evidence). **Mobile decision:** only the
+  verdict is translated; the user's input is never altered. Translations are cached per
+  (verdict, language) in the app and per (input hash, language) in the backend, so switching
+  back and forth is free after the first call.
 
 ---
 
@@ -161,15 +165,28 @@ IMPORTANT: You MUST respond entirely in {language} ({en = English | fr = French}
 | Detect risky patterns (OTP, "send money") | ✅ Easy                                                                                        | ✅ Easy                                             | Prompt/schema logic              |
 | Offline rule-based fallback               | ✅ Easy                                                                                        | ✅ Easy                                             | Static rules                     |
 | History / saved reports                   | ✅ Easy                                                                                        | ✅ Easy                                             | Local storage / backend          |
-| **Auto-scan incoming SMS inbox + warn**   | ⚠️ Hard — must be **default SMS handler** to get `READ_SMS`/`RECEIVE_SMS` (Google Play policy) | ❌ **Impossible** — no public API reads SMS content | Flagship "shield" is constrained |
+| **Auto-scan incoming SMS inbox + warn**   | ⚠️ Hard — `READ_SMS`/`RECEIVE_SMS` need **default SMS handler** status, or the Play "anti-smishing" exception (requires a proven protection track record). Realistic alternative: **Notification Listener** (reads notification text incl. WhatsApp/MoMo; user-granted special access, still Play-reviewed) | ⚠️ **Partial** — inbox is unreadable, but Apple's **Message Filter Extension** (`ILMessageFilterExtension`) can classify SMS from *unknown senders* as junk (offline rules or fixed backend URL) | Flagship "shield" is constrained but not dead |
 | **Block / intercept calls or texts**      | ⚠️ Hard — default phone/SMS handler + big permissions                                          | ⚠️ Partial — CallKit VoIP-style; can't read SMS     | Limited on iOS                   |
 | SIM-swap / account-lock alerts            | ⚠️ Partial — detect? no; educate + escalate                                                    | ⚠️ Partial — same                                   | Education/reporting, not passive |
 | **Community reports + shared blacklist**  | ✅ Easy (backend)                                                                              | ✅ Easy (backend)                                   | Strong feature; no permissions   |
 | Auto-warn on scam link before clicking    | ⚠️ Medium — limited deep-link/accessibility                                                    | ⚠️ Difficult                                        | Depends on intercept             |
 
-**Key constraint:** iOS does **not** allow third-party apps to read the SMS/call inbox. Any
-"read your texts and warn you" feature is **Android-only** and gated behind **default-SMS-handler**
-status + Google Play permission review.
+**Key constraint:** iOS does **not** allow third-party apps to read the SMS/call inbox. A
+"read your texts and warn you" feature is therefore **Android-first**:
+
+- **Android (SMS permissions):** Google Play only grants the SMS permission group to the
+  **default SMS/Phone/Assistant handler** or to listed exceptions. "Anti-SMS phishing /
+  spam detection" *is* a listed exception, but only for apps with a documented protection
+  track record (analyst reports, benchmarks) — a new app will not qualify. Becoming the
+  default SMS handler means SabiCheck must be a full SMS app (send/receive) — out of scope.
+- **Android (realistic path):** a **Notification Listener Service** reads the text of
+  incoming notifications (SMS, WhatsApp, MoMo/OM apps) without SMS permissions. It is a
+  user-granted special access and Play scrutinises it (must be core functionality, prominently
+  disclosed) but it is achievable. This is the Tier-2 "real-time warning" plan.
+- **iOS (realistic path):** a **Message Filter Extension** receives sender + body for SMS
+  from **unknown senders** and returns junk / promotion / transaction; iOS suppresses the
+  notification and moves the thread to Junk. No custom alerts, no WhatsApp — but it is an
+  official, App-Store-legal "SabiCheck silently filters MoMo smishing" feature.
 
 ---
 
@@ -221,8 +238,9 @@ app runs independently of the mobile app.
   Gemini logic in `src/services/geminiService.ts`.
 - **Mobile app (new Flutter app):** goes in a **new, separate repo** (e.g. `SabiCheck`).
   Flutter produces its own web build too, so co-hosting with React is unnecessary.
-- **Backend proxy:** shared by both. Either its own repo or a folder in the Flutter repo (or
-  web repo). Recommended: separate small backend service.
+- **Backend proxy:** shared by both. **Decision (2026-09-02):** lives in this repo under
+  `backend/` (Node 20 · TypeScript · Express 5 · `@google/genai`). It is self-contained and can
+  be moved to its own repo later without changes. See `backend/README.md`.
 
 ### Why separate repos (not a branch / not a monorepo)
 
@@ -243,13 +261,20 @@ app runs independently of the mobile app.
 
 ## 9. Development Environment Constraints (for future sessions)
 
-**Session binding:** This Arena session is pinned to branch
-`arena/01a06056-scamshield-cyber-ai` in this repo and cannot switch to a different repository.
-Any new repo must be created by the user; the build happens there.
+**This repo (`tataisaac/SabiCheck`) is the Flutter app.** Scaffolded with Flutter 3.47 /
+Dart 3.13 for **Android + iOS + web** from one codebase (project name `sabicheck`).
 
-**Scaffold recommendation:** When creating the new Flutter repo from scratch, target
-**Android + iOS + web** from one Flutter codebase. Use `flutter create` (e.g. Project name
-`sabicheck`).
+**Agent sandbox limits (for future Arena sessions):** the sandbox has Node but **no Flutter/Dart
+SDK and no route to `storage.googleapis.com` / `pub.dev` downloads**, so Dart cannot be compiled
+or tested there. Compensations in place:
+
+- `.github/workflows/ci.yml` runs `flutter analyze --fatal-infos`, `flutter test`, a debug APK
+  build and a web build on every push (plus backend tests). **Treat CI as the Dart compiler.**
+- The backend is fully buildable/testable in the sandbox (`npm test`, 50 tests, no network).
+- Anything needing a device/emulator, Xcode or store consoles happens on the user's machine.
+
+**Verification loop for Flutter changes:** push → check Actions → fix → repeat; then
+`flutter run` locally against `backend/` in mock mode.
 
 ---
 
@@ -257,25 +282,42 @@ Any new repo must be created by the user; the build happens there.
 
 When scaffolding, set:
 
-- **Project / package name:** `sabicheck` (Dart package + Android applicationId)
-- **Android package ID:** `com.<org>.sabicheck`
-- **iOS bundle ID:** `com.<org>.sabicheck`
-- **App display name:** `SabiCheck` (or `SabiCheck — Scam & Fraud Detector` for stores)
-- **Brand color:** emerald/teal green (matches existing ScamShield UI theme) — decision pending.
+- **Project / package name:** `sabicheck` ✅
+- **Android applicationId / namespace:** `com.incredible.sabicheck` ✅
+- **iOS bundle ID:** `com.incredible.sabicheck` ✅ (Share Extension: `com.incredible.sabicheck.ShareExtension`,
+  App Group: `group.com.incredible.sabicheck`)
+- **App display name:** `SabiCheck` ✅ (store listing title can be
+  `SabiCheck — Scam & Fraud Verifier`)
+- **Brand color:** emerald `#10B981` on slate neutrals (light `#F8FAFC`, dark `#020617`) ✅ —
+  carried over from the ScamShield UI; implemented in `lib/theme/app_theme.dart`.
+- **Backend URL:** `--dart-define=SABICHECK_API_URL=…` (default `http://10.0.2.2:8080` in debug);
+  also editable at runtime in *Settings → Developer*.
 
 ---
 
 ## 11. Open Decisions / TODO
 
-- [ ] Confirm final app display name (short `SabiCheck` vs descriptive).
-- [ ] Confirm Android applicationId and iOS bundle ID (`com.<org>.sabicheck`).
-- [ ] Decide where the **backend proxy** lives (own repo vs inside Flutter repo).
-- [ ] Confirm Flutter vs React Native final choice (currently: **Flutter** for a beginner with
-      lowest learning curve; RN only if the user wants to stay in the JS/React world).
-- [ ] Set up the Gemini proxy before any API key is placed in the mobile app.
-- [ ] Implement the **share-sheet** integration first (Android intent + iOS extension) — it is
-      the killer feature and works on both platforms.
+- [x] Confirm final app display name → `SabiCheck`.
+- [x] Confirm Android applicationId and iOS bundle ID → `com.incredible.sabicheck`.
+- [x] Decide where the **backend proxy** lives → `backend/` in this repo.
+- [x] Confirm Flutter vs React Native → **Flutter** (scaffolded, code written).
+- [x] Set up the Gemini proxy before any API key is placed in the mobile app → done; the app has
+      no key at all.
+- [x] Implement the **share-sheet** integration (Android intent filters + iOS extension
+      sources) → Android complete; iOS needs the Xcode wiring in `docs/IOS_SHARE_EXTENSION.md`.
+- [ ] **Deploy the backend** (Cloud Run / Render / Fly) and bake the URL into release builds.
+- [ ] Verify the real Gemini path end-to-end with a key (`SABICHECK_MODE=gemini`) — the sandbox
+      cannot reach Google APIs, so this was only tested with a mocked SDK.
+- [ ] Replace placeholder launcher icons; create the Android release keystore.
 - [ ] Verify brand/trademark availability for "Sabi" and "SabiCheck" before store submission.
+- [ ] Tier 1 next steps: offline rule engine (Dart port of the backend mock heuristics as a
+      first pass), number/link reputation endpoint, "report a scam".
+
+## 12. Implementation Log
+
+- **2026-09-02** — Backend proxy built and tested (50 tests). Flutter app core written: check
+  flow, EN/FR, dark mode, local history, settings, Android share sheet, iOS share extension
+  sources, CI workflow. Spec §5.3/§6/§8/§9/§10/§11 updated to match reality.
 
 ---
 

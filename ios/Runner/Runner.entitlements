@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Shared container between the app and its Share Extension. Add the
+	     "App Groups" capability to the Runner target in Xcode and select this group;
+	     Xcode will link this file to the target automatically. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.incredible.sabicheck</string>
+	</array>
+</dict>
+</plist>

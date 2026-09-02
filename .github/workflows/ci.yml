@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "arena/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ["20", "22"]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Smoke-test the built server (mock mode)
+        run: |
+          SABICHECK_MODE=mock PORT=8099 node dist/server.js &
+          PID=$!
+          for i in $(seq 1 20); do curl -fs http://localhost:8099/healthz && break; sleep 0.5; done
+          curl -fs -X POST http://localhost:8099/v1/analyze \
+            -H 'Content-Type: application/json' \
+            -d '{"message":"Send your PIN and 2000 FCFA to claim your prize","language":"fr"}' | tee /tmp/out.json
+          grep -q '"riskLevel":"High"' /tmp/out.json
+          kill $PID
+
+  flutter:
+    name: Flutter (analyze · test · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.x
+          cache: true
+      - run: flutter --version
+      - run: flutter pub get
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze --fatal-infos
+      - run: flutter test --reporter expanded
+      - name: Build debug APK (compiles Android + all plugins)
+        run: flutter build apk --debug --dart-define=SABICHECK_API_URL=https://api.sabicheck.example
+      - name: Build web
+        run: flutter build web --release --dart-define=SABICHECK_API_URL=https://api.sabicheck.example
+      - uses: actions/upload-artifact@v6
+        with:
+          name: sabicheck-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7
