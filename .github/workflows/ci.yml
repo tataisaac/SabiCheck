@@ -68,12 +68,13 @@ jobs:
         id: analyze
         run: |
           set +e
-          flutter analyze --fatal-infos 2>&1 | tee /tmp/analyze.txt
+          mkdir -p ci-logs
+          flutter analyze --fatal-infos 2>&1 | tee ci-logs/analyze.txt
           status=${PIPESTATUS[0]}
           {
             echo "## flutter analyze (exit $status)"
             echo '```'
-            tail -n 120 /tmp/analyze.txt
+            tail -n 120 ci-logs/analyze.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
@@ -81,29 +82,37 @@ jobs:
         id: test
         run: |
           set +e
-          flutter test --reporter compact 2>&1 | tee /tmp/test.txt
+          flutter test --reporter compact 2>&1 | tee ci-logs/test.txt
           status=${PIPESTATUS[0]}
           {
             echo "## flutter test (exit $status)"
             echo '```'
-            grep -vE '^\s*$' /tmp/test.txt | grep -E "^[0-9]{2}:[0-9]{2} \+[0-9]+.*(-[0-9]+|: (Some tests failed|All tests passed))|Expected|Actual|Which|package:|test/|Error|error|EXCEPTION|═|The following" | tail -n 150
+            grep -vE '^\s*$' ci-logs/test.txt | grep -E "^[0-9]{2}:[0-9]{2} \+[0-9]+.*(-[0-9]+|: (Some tests failed|All tests passed))|Expected|Actual|Which|package:|test/|Error|error|EXCEPTION|═|The following" | tail -n 150
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: Build debug APK (compiles Android + all plugins)
         run: |
           set +e
-          flutter build apk --debug --dart-define=SABICHECK_API_URL=https://api.sabicheck.example 2>&1 | tee /tmp/apk.txt
+          flutter build apk --debug --dart-define=SABICHECK_API_URL=https://api.sabicheck.example 2>&1 | tee ci-logs/apk.txt
           status=${PIPESTATUS[0]}
-          { echo "## flutter build apk (exit $status)"; echo '```'; grep -vE '^\s*$' /tmp/apk.txt | tail -n 60; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "## flutter build apk (exit $status)"; echo '```'; grep -vE '^\s*$' ci-logs/apk.txt | tail -n 60; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: Build web
         run: |
           set +e
-          flutter build web --release --dart-define=SABICHECK_API_URL=https://api.sabicheck.example 2>&1 | tee /tmp/web.txt
+          flutter build web --release --dart-define=SABICHECK_API_URL=https://api.sabicheck.example 2>&1 | tee ci-logs/web.txt
           status=${PIPESTATUS[0]}
-          { echo "## flutter build web (exit $status)"; echo '```'; grep -vE '^\s*$' /tmp/web.txt | tail -n 40; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "## flutter build web (exit $status)"; echo '```'; grep -vE '^\s*$' ci-logs/web.txt | tail -n 40; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit $status
+      - name: Upload CI logs (always)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: flutter-ci-logs
+          path: ci-logs/
+          retention-days: 3
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v6
         with:
           name: sabicheck-debug-apk
