@@ -12,10 +12,10 @@ concurrency:
 
 permissions:
   contents: read
-  # Lets the Flutter job post analyzer/test output as a commit comment
-  # (artifact/log downloads are blocked from the agent sandbox).
-  statuses: write
-  pull-requests: write
+  # Lets the Flutter job publish analyzer/test/build output as a Check Run,
+  # readable through the REST API (raw job logs live on blob storage that the
+  # agent sandbox cannot reach).
+  checks: write
 
 jobs:
   backend:
@@ -96,6 +96,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: Build debug APK (compiles Android + all plugins)
+        id: apk
         run: |
           set +e
           flutter build apk --debug --dart-define=SABICHECK_API_URL=https://api.sabicheck.example 2>&1 | tee ci-logs/apk.txt
@@ -103,28 +104,49 @@ jobs:
           { echo "## flutter build apk (exit $status)"; echo '```'; grep -vE '^\s*$' ci-logs/apk.txt | tail -n 60; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: Build web
+        id: web
         run: |
           set +e
           flutter build web --release --dart-define=SABICHECK_API_URL=https://api.sabicheck.example 2>&1 | tee ci-logs/web.txt
           status=${PIPESTATUS[0]}
           { echo "## flutter build web (exit $status)"; echo '```'; grep -vE '^\s*$' ci-logs/web.txt | tail -n 40; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit $status
-      - name: Post results as a commit comment (always)
+      - name: Publish results as a Check Run (always)
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          STEP_ANALYZE: ${{ steps.analyze.outcome }}
+          STEP_TEST: ${{ steps.test.outcome }}
+          STEP_APK: ${{ steps.apk.outcome }}
+          STEP_WEB: ${{ steps.web.outcome }}
         run: |
-          {
-            echo "### Flutter CI — $(git rev-parse --short HEAD)"
-            for f in analyze test apk web; do
-              if [ -f "ci-logs/$f.txt" ]; then
-                echo; echo "<details><summary><b>$f</b> (last 200 lines)</summary>"; echo; echo '```'
-                grep -vE '^\s*$' "ci-logs/$f.txt" | tail -n 200 | cut -c1-400
-                echo '```'; echo "</details>"
-              fi
-            done
-          } > /tmp/comment.md
-          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -f body=@/tmp/comment.md >/dev/null || echo "::warning::could not post commit comment"
+          python3 - <<'PY'
+          import json, os, subprocess, pathlib
+          parts = []
+          conclusion = "success"
+          for name in ["analyze", "test", "apk", "web"]:
+              f = pathlib.Path(f"ci-logs/{name}.txt")
+              if not f.exists():
+                  parts.append(f"## {name}\n_(skipped)_\n"); continue
+              lines = [l.rstrip()[:400] for l in f.read_text(errors="replace").splitlines() if l.strip()]
+              parts.append(f"## {name}\n```\n" + "\n".join(lines[-220:]) + "\n```\n")
+          text = "\n".join(parts)
+          text = text[-60000:]
+          for name in ["analyze", "test", "apk", "web"]:
+              if os.environ.get(f"STEP_{name.upper()}") == "failure":
+                  conclusion = "failure"
+          body = {
+              "name": "Flutter CI report",
+              "head_sha": os.environ["GITHUB_SHA"],
+              "status": "completed",
+              "conclusion": conclusion,
+              "output": {"title": f"Flutter CI report ({conclusion})", "summary": "Output of flutter analyze / test / build. Fetch with: gh api repos/OWNER/REPO/commits/SHA/check-runs", "text": text},
+          }
+          pathlib.Path("/tmp/check.json").write_text(json.dumps(body))
+          subprocess.run(["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs", "--input", "/tmp/check.json", "--silent"], check=False)
+          PY
+        # step outcomes so the report can carry an accurate conclusion
+        # (steps use `set +e` internally but still exit non-zero on failure)
       - name: Upload CI logs (always)
         if: always()
         uses: actions/upload-artifact@v6
