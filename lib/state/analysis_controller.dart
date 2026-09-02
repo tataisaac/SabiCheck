@@ -37,8 +37,8 @@ class AnalysisController extends ChangeNotifier {
   AnalysisController({
     required this._apiFactory,
     required this._history,
-    ShareReceiver this._shareReceiver = const NoopShareReceiver(),
-    ImageLoader this._imageLoader = const ImageLoader(),
+    this._shareReceiver = const NoopShareReceiver(),
+    this._imageLoader = const ImageLoader(),
   });
 
   final SabiCheckApi Function() _apiFactory;
